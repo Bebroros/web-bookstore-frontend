@@ -6,18 +6,85 @@ const navbarContainer = document.getElementById('navbar-container');
 let allBooks = [];
 let allAuthors = [];
 let allPublishers = [];
+let currentUser = null;
 
-const createNavbar = () => `
-    <nav class="navbar">
-        <a href="#/books" class="nav-brand">Книгарня 📚</a>
-        <div class="nav-links">
-            <a href="#/books">Книги</a>
-            <a href="#/authors">Автори</a>
-            <a href="#/publishers">Видавництва</a>
-            <a href="#/books/new" class="btn-add">+ Додати книгу</a>
-        </div>
-    </nav>
-`;
+const isAuthenticated = () => {
+    return !!sessionStorage.getItem('accessToken');
+};
+
+const getUsername = () => {
+    return sessionStorage.getItem('username') || 'Користувач';
+};
+
+function jwtDecode(token) {
+    try {
+        return JSON.parse(atob(token.split('.')[1]));
+    } catch (e) {
+        return null;
+    }
+}
+
+const isStaff = () => {
+    const token = sessionStorage.getItem('accessToken');
+    if (!token) return false;
+    const decoded = jwtDecode(token);
+    return decoded && decoded.is_staff === true;
+};
+
+const getUserId = () => {
+    const token = sessionStorage.getItem('accessToken');
+    if (!token) return null;
+    const decoded = jwtDecode(token);
+    return decoded ? decoded.user_id : null;
+};
+
+const createNavbar = () => {
+    const authenticated = isAuthenticated();
+    const username = getUsername();
+    const staff = isStaff();
+
+    return `
+        <nav class="navbar">
+            <a href="#/books" class="nav-brand">Книгарня 📚</a>
+            <div class="nav-links">
+                <a href="#/books">Книги</a>
+                <a href="#/authors">Автори</a>
+                <a href="#/publishers">Видавництва</a>
+                ${authenticated && staff ? `
+                    <a href="#/books/new" class="btn-add">+ Додати книгу</a>
+                ` : ''}
+                ${authenticated ? `
+                    <a href="#/profile" class="username">👤 ${username}</a>
+                    <button id="logout-btn" class="btn-logout">Вийти</button>
+                ` : `
+                    <a href="#/login" class="btn-login">Увійти</a>
+                    <a href="#/register" class="btn-register">Реєстрація</a>
+                `}
+            </div>
+        </nav>
+    `;
+};
+
+const updateNavbar = () => {
+    navbarContainer.innerHTML = createNavbar();
+
+    const logoutBtn = document.getElementById('logout-btn');
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', handleLogout);
+    }
+};
+
+const handleLogout = () => {
+    sessionStorage.removeItem('accessToken');
+    sessionStorage.removeItem('refreshToken');
+    sessionStorage.removeItem('username');
+    currentUser = null;
+    allBooks = [];
+    allAuthors = [];
+    allPublishers = [];
+    updateNavbar();
+    window.location.hash = '/books';
+};
 
 const createBookCard = (book) => `
     <div class="card">
@@ -129,15 +196,18 @@ async function renderBookDetailPage(id) {
 
     const author = await api.getAuthorById(book.author);
     const publisher = await api.getPublisherById(book.publisher);
+    const staff = isStaff();
 
     app.innerHTML = `
         <div class="detail-container">
             <div class="detail-header">
                 <h1>${book.name}</h1>
-                <div class="detail-actions">
-                    <a href="#/books/edit/${book.id}" class="btn btn-edit">Редагувати</a>
-                    <button class="btn btn-delete" id="delete-book-btn">Видалити</button>
-                </div>
+                ${staff ? `
+                    <div class="detail-actions">
+                        <a href="#/books/edit/${book.id}" class="btn btn-edit">Редагувати</a>
+                        <button class="btn btn-delete" id="delete-book-btn">Видалити</button>
+                    </div>
+                ` : ''}
             </div>
             <h3>Автор: <a href="#/authors/${book.author}">${author ? author.name : 'Невідомий автор'}</a></h3>
             <div class="meta-info">
@@ -152,17 +222,19 @@ async function renderBookDetailPage(id) {
         </div>
     `;
 
-    document.getElementById('delete-book-btn').addEventListener('click', async () => {
-        if (confirm('Ви впевнені, що хочете видалити цю книгу?')) {
-            const success = await api.deleteBook(id);
-            if (success) {
-                allBooks = [];
-                window.location.hash = '/books';
-            } else {
-                alert('Помилка при видаленні книги');
+    if (staff) {
+        document.getElementById('delete-book-btn').addEventListener('click', async () => {
+            if (confirm('Ви впевнені, що хочете видалити цю книгу?')) {
+                const success = await api.deleteBook(id);
+                if (success) {
+                    allBooks = [];
+                    window.location.hash = '/books';
+                } else {
+                    alert('Помилка при видаленні книги');
+                }
             }
-        }
-    });
+        });
+    }
 }
 
 async function renderAuthorListPage() {
@@ -170,10 +242,12 @@ async function renderAuthorListPage() {
     if (allAuthors.length === 0) {
         allAuthors = await api.getAuthors() || [];
     }
+    const staff = isStaff();
+
     app.innerHTML = `
         <div class="detail-header">
             <h1>Автори</h1>
-            <a href="#/authors/new" class="btn btn-add">+ Додати автора</a>
+            ${staff ? `<a href="#/authors/new" class="btn btn-add">+ Додати автора</a>` : ''}
         </div>
         <div class="grid">
             ${allAuthors.map(createAuthorCard).join('')}
@@ -197,14 +271,18 @@ async function renderAuthorDetailPage(id) {
         validBooks = books.filter(book => book !== null);
     }
 
+    const staff = isStaff();
+
     app.innerHTML = `
         <div class="detail-container">
             <div class="detail-header">
                 <h1>${author.name}</h1>
-                <div class="detail-actions">
-                    <a href="#/authors/edit/${author.id}" class="btn btn-edit">Редагувати</a>
-                    <button class="btn btn-delete" id="delete-author-btn">Видалити</button>
-                </div>
+                ${staff ? `
+                    <div class="detail-actions">
+                        <a href="#/authors/edit/${author.id}" class="btn btn-edit">Редагувати</a>
+                        <button class="btn btn-delete" id="delete-author-btn">Видалити</button>
+                    </div>
+                ` : ''}
             </div>
             <h2>Біографія</h2>
             <p>${author.description || 'Опис відсутній.'}</p>
@@ -220,17 +298,19 @@ async function renderAuthorDetailPage(id) {
         </div>
     `;
 
-    document.getElementById('delete-author-btn').addEventListener('click', async () => {
-        if (confirm('Ви впевнені, що хочете видалити цього автора?')) {
-            const success = await api.deleteAuthor(id);
-            if (success) {
-                allAuthors = [];
-                window.location.hash = '/authors';
-            } else {
-                alert('Помилка при видаленні автора');
+    if (staff) {
+        document.getElementById('delete-author-btn').addEventListener('click', async () => {
+            if (confirm('Ви впевнені, що хочете видалити цього автора?')) {
+                const success = await api.deleteAuthor(id);
+                if (success) {
+                    allAuthors = [];
+                    window.location.hash = '/authors';
+                } else {
+                    alert('Помилка при видаленні автора');
+                }
             }
-        }
-    });
+        });
+    }
 }
 
 async function renderPublisherListPage() {
@@ -238,10 +318,12 @@ async function renderPublisherListPage() {
     if (allPublishers.length === 0) {
         allPublishers = await api.getPublishers() || [];
     }
+    const staff = isStaff();
+
     app.innerHTML = `
         <div class="detail-header">
             <h1>Видавництва</h1>
-            <a href="#/publishers/new" class="btn btn-add">+ Додати видавництво</a>
+            ${staff ? `<a href="#/publishers/new" class="btn btn-add">+ Додати видавництво</a>` : ''}
         </div>
         <div class="grid">
             ${allPublishers.map(createPublisherCard).join('')}
@@ -265,14 +347,18 @@ async function renderPublisherDetailPage(id) {
         validBooks = books.filter(book => book !== null);
     }
 
+    const staff = isStaff();
+
     app.innerHTML = `
         <div class="detail-container">
             <div class="detail-header">
                 <h1>${publisher.name}</h1>
-                <div class="detail-actions">
-                    <a href="#/publishers/edit/${publisher.id}" class="btn btn-edit">Редагувати</a>
-                    <button class="btn btn-delete" id="delete-publisher-btn">Видалити</button>
-                </div>
+                ${staff ? `
+                    <div class="detail-actions">
+                        <a href="#/publishers/edit/${publisher.id}" class="btn btn-edit">Редагувати</a>
+                        <button class="btn btn-delete" id="delete-publisher-btn">Видалити</button>
+                    </div>
+                ` : ''}
             </div>
             <h2>Про видавництво</h2>
             <p>${publisher.description || 'Опис відсутній.'}</p>
@@ -288,22 +374,29 @@ async function renderPublisherDetailPage(id) {
         </div>
     `;
 
-    document.getElementById('delete-publisher-btn').addEventListener('click', async () => {
-        if (confirm('Ви впевнені, що хочете видалити це видавництво?')) {
-            const success = await api.deletePublisher(id);
-            if (success) {
-                allPublishers = [];
-                window.location.hash = '/publishers';
-            } else {
-                alert('Помилка при видаленні видавництва');
+    if (staff) {
+        document.getElementById('delete-publisher-btn').addEventListener('click', async () => {
+            if (confirm('Ви впевнені, що хочете видалити це видавництво?')) {
+                const success = await api.deletePublisher(id);
+                if (success) {
+                    allPublishers = [];
+                    window.location.hash = '/publishers';
+                } else {
+                    alert('Помилка при видаленні видавництва');
+                }
             }
-        }
-    });
+        });
+    }
 }
 
 async function renderBookFormPage(id = null) {
+    if (!isStaff()) {
+        app.innerHTML = `<div class="error-message">Доступ заборонено. Тільки адміністратори можуть додавати та редагувати книги.</div>`;
+        return;
+    }
+
     app.innerHTML = `<div class="loader">Завантаження...</div>`;
-    
+
     if (allAuthors.length === 0) {
         allAuthors = await api.getAuthors() || [];
     }
@@ -417,6 +510,11 @@ async function renderBookFormPage(id = null) {
 }
 
 async function renderAuthorFormPage(id = null) {
+    if (!isStaff()) {
+        app.innerHTML = `<div class="error-message">Доступ заборонено. Тільки адміністратори можуть додавати та редагувати авторів.</div>`;
+        return;
+    }
+
     app.innerHTML = `<div class="loader">Завантаження...</div>`;
     
     let author = null;
@@ -478,6 +576,11 @@ async function renderAuthorFormPage(id = null) {
 }
 
 async function renderPublisherFormPage(id = null) {
+    if (!isStaff()) {
+        app.innerHTML = `<div class="error-message">Доступ заборонено. Тільки адміністратори можуть додавати та редагувати видавництва.</div>`;
+        return;
+    }
+
     app.innerHTML = `<div class="loader">Завантаження...</div>`;
     
     let publisher = null;
@@ -538,10 +641,266 @@ async function renderPublisherFormPage(id = null) {
     });
 }
 
+async function renderLoginPage() {
+    if (isAuthenticated()) {
+        window.location.hash = '/books';
+        return;
+    }
+
+    app.innerHTML = `
+        <div class="detail-container">
+            <h1>Вхід</h1>
+            <form id="login-form" class="book-form">
+                <div class="form-group">
+                    <label for="username">Ім'я користувача</label>
+                    <input type="text" id="username" name="username" required>
+                </div>
+                <div class="form-group">
+                    <label for="password">Пароль</label>
+                    <input type="password" id="password" name="password" required>
+                </div>
+                <div id="error-message" class="error-message" style="display: none;"></div>
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">Увійти</button>
+                </div>
+            </form>
+        </div>
+    `;
+
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const errorDiv = document.getElementById('error-message');
+        errorDiv.style.display = 'none';
+
+        const formData = {
+            username: document.getElementById('username').value,
+            password: document.getElementById('password').value,
+        };
+
+        const result = await api.login(formData);
+
+        if (result && result.access) {
+            sessionStorage.setItem('accessToken', result.access);
+            sessionStorage.setItem('refreshToken', result.refresh);
+            sessionStorage.setItem('username', formData.username);
+            updateNavbar();
+        } else {
+            errorDiv.textContent = 'Неправильне ім\'я користувача або пароль';
+            errorDiv.style.display = 'block';
+        }
+    });
+}
+
+async function renderRegisterPage() {
+    if (isAuthenticated()) {
+        window.location.hash = '/books';
+        return;
+    }
+
+    app.innerHTML = `
+        <div class="auth-container">
+            <div class="auth-card">
+                <h1>Реєстрація</h1>
+                <form id="register-form" class="auth-form">
+                    <div class="form-group">
+                        <label for="username">Ім'я користувача*</label>
+                        <input type="text" id="username" name="username" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="email">Пошта*</label>
+                        <input type="email" id="email" name="email" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="first_name">Ім'я</label>
+                        <input type="text" id="first_name" name="first_name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="last_name">Прізвище</label>
+                        <input type="text" id="last_name" name="last_name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="password">Пароль*</label>
+                        <input type="password" id="password" name="password" required minlength="8">
+                        <small>Мінімум 8 символів</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="password2">Підтвердіть пароль*</label>
+                        <input type="password" id="password2" name="password2" required minlength="8">
+                    </div>
+                    <div id="error-message" class="error-message" style="display: none;"></div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary full-width">Зареєструватись</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    `;
+
+    document.getElementById('register-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const errorDiv = document.getElementById('error-message');
+        errorDiv.style.display = 'none';
+
+        const password = document.getElementById('password').value;
+        const password2 = document.getElementById('password2').value;
+
+        if (password !== password2) {
+            errorDiv.textContent = 'Паролі не співпадають';
+            errorDiv.style.display = 'block';
+            return;
+        }
+
+        const formData = {
+            username: document.getElementById('username').value,
+            password: password,
+            password2: password2,
+            email: document.getElementById('email').value,
+            first_name: document.getElementById('first_name').value,
+            last_name: document.getElementById('last_name').value
+        };
+
+        const result = await api.register(formData);
+
+        if (result) {
+            alert('Реєстрація успішна.');
+            window.location.hash = '/login';
+        } else {
+            errorDiv.textContent = 'Помилка реєстрації.';
+            errorDiv.style.display = 'block';
+        }
+    });
+}
+
+async function renderProfilePage() {
+    if (!isAuthenticated()) {
+        window.location.hash = '/login';
+        return;
+    }
+
+    app.innerHTML = `<div class="loader">Завантаження...</div>`;
+
+    const userId = getUserId();
+    if (!userId) {
+        app.innerHTML = `<div class="error-message">Не вдалося визначити користувача.</div>`;
+        return;
+    }
+
+    const userProfile = await api.getUserProfile(userId);
+
+    if (!userProfile) {
+        app.innerHTML = `<div class="error-message">Не вдалося завантажити профіль.</div>`;
+        return;
+    }
+
+    const isEditing = sessionStorage.getItem('editingProfile') === 'true';
+
+    if (isEditing) {
+        app.innerHTML = `
+            <div class="detail-container">
+                <h1>Редагувати профіль</h1>
+                <form id="profile-form" class="book-form">
+                    <div class="form-group">
+                        <label for="username">Ім'я користувача</label>
+                        <input type="text" id="username" name="username" value="${userProfile.username}" disabled>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="first_name">Ім'я</label>
+                        <input type="text" id="first_name" name="first_name" value="${userProfile.first_name || ''}">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="last_name">Прізвище</label>
+                        <input type="text" id="last_name" name="last_name" value="${userProfile.last_name || ''}">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="email">Email</label>
+                        <input type="email" id="email" name="email" value="${userProfile.email || ''}">
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">Зберегти</button>
+                        <button type="button" id="cancel-btn" class="btn btn-secondary">Скасувати</button>
+                    </div>
+                </form>
+            </div>
+        `;
+
+        document.getElementById('cancel-btn').addEventListener('click', () => {
+            sessionStorage.removeItem('editingProfile');
+            renderProfilePage();
+        });
+
+        document.getElementById('profile-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const formData = {
+                first_name: document.getElementById('first_name').value,
+                last_name: document.getElementById('last_name').value,
+                email: document.getElementById('email').value,
+            };
+
+            const result = await api.updateUserProfile(userId, formData);
+
+            if (result) {
+                sessionStorage.removeItem('editingProfile');
+                alert('Профіль успішно оновлено!');
+                renderProfilePage();
+            } else {
+                alert('Помилка при оновленні профілю');
+            }
+        });
+    } else {
+        app.innerHTML = `
+            <div class="detail-container">
+                <div class="detail-header">
+                    <h1>Мій профіль</h1>
+                    <button id="edit-profile-btn" class="btn btn-edit">Редагувати</button>
+                </div>
+
+                <div class="profile-info">
+                    <div class="form-group">
+                        <label>Ім'я користувача</label>
+                        <p>${userProfile.username}</p>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Ім'я</label>
+                        <p>${userProfile.first_name || 'Не вказано'}</p>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Прізвище</label>
+                        <p>${userProfile.last_name || 'Не вказано'}</p>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Email</label>
+                        <p>${userProfile.email || 'Не вказано'}</p>
+                    </div>
+                </div>
+
+                <a href="#/books">← Повернутися до книг</a>
+            </div>
+        `;
+
+        document.getElementById('edit-profile-btn').addEventListener('click', () => {
+            sessionStorage.setItem('editingProfile', 'true');
+            renderProfilePage();
+        });
+    }
+}
+
 const routes = {
     '/books': renderBookListPage,
     '/authors': renderAuthorListPage,
     '/publishers': renderPublisherListPage,
+    '/login': renderLoginPage,
+    '/register': renderRegisterPage,
+    '/profile': renderProfilePage,
 };
 
 function router() {
@@ -574,11 +933,19 @@ function router() {
     } else if (routes[path]) {
         routes[path]();
     } else {
-        window.location.hash = '/books';
+        window.location.hash = '/login';
     }
 }
 
-navbarContainer.innerHTML = createNavbar();
+updateNavbar();
 
-window.addEventListener('hashchange', router);
-window.addEventListener('load', router);
+window.addEventListener('hashchange', () => {
+    router();
+    updateNavbar();
+});
+
+window.addEventListener('load', () => {
+
+    router();
+    updateNavbar();
+});
